@@ -16,8 +16,8 @@ over the Parallels virtual network.
 curl -fsSL https://raw.githubusercontent.com/marcho78/omarchy-clipboard-bridge/main/install.sh | bash
 ```
 
-or from the AUR (`yay -S omarchy-clipboard-bridge` then `clipboard-bridge install`),
-or from a clone with `./install.sh --build` if you have cargo.
+or from a clone with `./install.sh --build` if you have cargo. An AUR package
+is prepared under `packaging/aur` but not yet published.
 
 This puts `clipboard-bridge` in `~/.local/bin` and enables a `systemd --user`
 service that starts with your Hyprland session.
@@ -117,6 +117,14 @@ Pairing ids and secrets are stored in the same files.
 * **Bridged networking.** mDNS usually still finds the host. If not, set
   `host = "<Mac LAN IP>"` in `guest.toml` and `systemctl --user restart clipboard-bridge`.
 * **Pairing denied by accident.** Run `clipboard-bridge pair` in the VM to try again.
+
+## Upgrading from 0.1 (the Python version)
+
+Run the installers above on both sides. They replace the service definitions
+in place. Then delete the old files: in the VM `~/.local/share/clipboard-bridge`,
+`~/.local/bin/omarchy-clipboard-bridge` and `~/.config/clipboard-bridge/config`;
+on the Mac `~/.local/share/clipboard-bridge` and `~/.config/clipboard-bridge/config`.
+Pairing replaces the old token, so no config carries over.
 
 ## Uninstall
 
