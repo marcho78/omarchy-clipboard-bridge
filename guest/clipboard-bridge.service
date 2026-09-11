@@ -1,0 +1,14 @@
+[Unit]
+Description=Clipboard bridge between Omarchy and the macOS host (Parallels)
+Documentation=https://github.com/marcho78/omarchy-clipboard-bridge
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/share/clipboard-bridge/clipboard-bridge-guest.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

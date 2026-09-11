@@ -1,0 +1,163 @@
+#!/bin/bash
+# omarchy-clipboard-bridge — manage the clipboard bridge between this Omarchy VM
+# and its macOS host (Parallels Desktop).
+set -euo pipefail
+
+SHARE_DIR="$HOME/.local/share/clipboard-bridge"
+CONFIG_DIR="$HOME/.config/clipboard-bridge"
+CONFIG="$CONFIG_DIR/config"
+UNIT="clipboard-bridge.service"
+UNIT_DIR="$HOME/.config/systemd/user"
+BIN_DIR="$HOME/.local/bin"
+DEFAULT_PORT=52017
+SETUP_PORT=52018
+REPO_URL="https://github.com/marcho78/omarchy-clipboard-bridge"
+
+# Source tree this script was launched from (a git clone), if any.
+SRC_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
+
+usage() {
+  cat <<USAGE
+Usage: omarchy-clipboard-bridge <command>
+
+  install       Install the guest daemon (systemd user service) and print host setup steps
+  host-setup    Serve the macOS installer from this VM and print the one-liner to run on the Mac
+  status        Show service state, connection state and recent log lines
+  logs          Follow the daemon log
+  start | stop | restart
+  token         Print the shared secret (needed if installing the host side manually)
+  config        Open the config file in \$EDITOR
+  uninstall     Remove the guest daemon (add --purge to also remove the config)
+USAGE
+}
+
+need_config() {
+  [[ -f "$CONFIG" ]] || { echo "Not installed. Run: omarchy-clipboard-bridge install" >&2; exit 1; }
+}
+
+cfg_get() { sed -n "s/^$1=//p" "$CONFIG" 2>/dev/null | tr -d '"'"'" | head -n1; }
+
+detect_host() {
+  local gw
+  gw="$(ip -4 route show default 2>/dev/null | awk '/via/ {print $3; exit}')"
+  [[ -n "$gw" ]] && echo "${gw%.*}.2" || echo "10.211.55.2"
+}
+
+guest_ip() {
+  local host; host="$(cfg_get HOST)"; [[ -n "$host" ]] || host="$(detect_host)"
+  ip -4 route get "$host" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}'
+}
+
+cmd_install() {
+  if ! grep -qi parallels /sys/class/dmi/id/sys_vendor 2>/dev/null; then
+    echo "Warning: this does not look like a Parallels VM. Continuing anyway." >&2
+  fi
+  for tool in wl-paste wl-copy python3 systemctl; do
+    command -v "$tool" >/dev/null || { echo "missing: $tool (pacman -S wl-clipboard python)" >&2; exit 1; }
+  done
+  [[ -f "$SRC_DIR/guest/clipboard-bridge-guest.py" ]] || { echo "run this from a clone of the repo" >&2; exit 1; }
+
+  mkdir -p "$SHARE_DIR/host" "$CONFIG_DIR" "$UNIT_DIR" "$BIN_DIR"
+  install -m 755 "$SRC_DIR/guest/clipboard-bridge-guest.py" "$SHARE_DIR/clipboard-bridge-guest.py"
+  install -m 644 "$SRC_DIR/guest/clipboard-bridge.service" "$UNIT_DIR/$UNIT"
+  install -m 644 "$SRC_DIR/host/"* "$SHARE_DIR/host/"
+  chmod 755 "$SHARE_DIR/host/"*.sh "$SHARE_DIR/host/"*.py
+  if [[ "$(readlink -f "${BASH_SOURCE[0]}")" != "$BIN_DIR/omarchy-clipboard-bridge" ]]; then
+    install -m 755 "$SRC_DIR/bin/omarchy-clipboard-bridge" "$BIN_DIR/omarchy-clipboard-bridge"
+  fi
+
+  if [[ ! -f "$CONFIG" ]]; then
+    local token; token="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 40)"
+    umask 077
+    cat > "$CONFIG" <<CFG
+# omarchy-clipboard-bridge guest config
+# HOST: macOS host address. Leave empty to auto-detect (Parallels shared network: gateway .1 -> host .2).
+HOST=
+PORT=$DEFAULT_PORT
+TOKEN=$token
+CFG
+    umask 022
+    echo "Generated config with a new token at $CONFIG"
+  else
+    echo "Keeping existing config at $CONFIG"
+  fi
+
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$UNIT"
+  echo "Guest daemon enabled and started ($UNIT)."
+  [[ ":$PATH:" == *":$BIN_DIR:"* ]] || echo "Note: $BIN_DIR is not on your PATH."
+  cat <<MSG
+
+Next: install the host side on your Mac. Easiest is to run
+
+    omarchy-clipboard-bridge host-setup
+
+which prints a curl one-liner to paste into a macOS Terminal.
+MSG
+}
+
+cmd_host_setup() {
+  need_config
+  local token port ip tmp
+  token="$(cfg_get TOKEN)"; port="$(cfg_get PORT)"; ip="$(guest_ip)"
+  [[ -n "$ip" ]] || { echo "could not determine this VM's IP address" >&2; exit 1; }
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  cp "$SHARE_DIR/host/"* "$tmp/"
+  local base="http://$ip:$SETUP_PORT"
+  sed -i "s|__BASE__|$base|g" "$tmp/install.sh"
+  sed -i "s|^PORT=\"\${CLIPBOARD_BRIDGE_PORT:-[0-9]*}\"|PORT=\"\${CLIPBOARD_BRIDGE_PORT:-$port}\"|" "$tmp/install.sh"
+  printf '%s' "$token" > "$tmp/token"
+  cat <<MSG
+
+Open Terminal on your Mac and run:
+
+    curl -fsSL $base/install.sh | bash
+
+Serving the installer on $base for 10 minutes (Ctrl-C to stop).
+Note: the token is served in plain text on this address while this runs; it is only
+reachable from the Parallels network on your Mac.
+MSG
+  ( cd "$tmp" && timeout 600 python3 -m http.server "$SETUP_PORT" --bind "$ip" 2>&1 \
+      | grep --line-buffered -E '"GET /(install.sh|token)' | sed 's/^/  host fetched: /' ) || true
+  echo
+  echo "Done serving. Check the result with: omarchy-clipboard-bridge status"
+}
+
+cmd_status() {
+  need_config
+  local host port; host="$(cfg_get HOST)"; [[ -n "$host" ]] || host="$(detect_host) (auto)"; port="$(cfg_get PORT)"
+  echo "service:  $(systemctl --user is-active "$UNIT" 2>/dev/null || true) / $(systemctl --user is-enabled "$UNIT" 2>/dev/null || true)"
+  echo "host:     $host:$port"
+  if ss -tn state established "( dport = :$port )" 2>/dev/null | grep -q "$port"; then
+    echo "link:     connected"
+  else
+    echo "link:     not connected (is the host agent installed and running on the Mac?)"
+  fi
+  echo "log:"
+  journalctl --user -u "$UNIT" -n 10 --no-pager -o cat 2>/dev/null | sed 's/^/  /'
+}
+
+cmd_uninstall() {
+  systemctl --user disable --now "$UNIT" 2>/dev/null || true
+  rm -f "$UNIT_DIR/$UNIT"
+  systemctl --user daemon-reload
+  rm -rf "$SHARE_DIR"
+  [[ "${1:-}" == "--purge" ]] && rm -rf "$CONFIG_DIR"
+  rm -f "$BIN_DIR/omarchy-clipboard-bridge"
+  echo "Guest daemon removed. To remove the host side, run on the Mac: ~/.local/share/clipboard-bridge/uninstall.sh --purge"
+  echo "  (or: curl -fsSL $REPO_URL/raw/main/host/uninstall.sh | bash)"
+}
+
+case "${1:-}" in
+  install)     cmd_install ;;
+  host-setup)  cmd_host_setup ;;
+  status)      cmd_status ;;
+  logs)        journalctl --user -u "$UNIT" -f -o cat ;;
+  start|stop|restart) systemctl --user "$1" "$UNIT" ;;
+  token)       need_config; cfg_get TOKEN ;;
+  config)      need_config; "${EDITOR:-nano}" "$CONFIG"; echo "Restart to apply: omarchy-clipboard-bridge restart" ;;
+  uninstall)   cmd_uninstall "${2:-}" ;;
+  -h|--help|help|"") usage ;;
+  *) echo "unknown command: $1" >&2; usage >&2; exit 1 ;;
+esac
