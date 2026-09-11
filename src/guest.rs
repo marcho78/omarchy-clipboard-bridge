@@ -15,7 +15,7 @@ use crate::config::{now, GuestConfig, State};
 use crate::discovery;
 use crate::net::{Reader, Writer};
 use crate::protocol::{hmac_hex, Frame};
-use crate::util::{local_name, log};
+use crate::util::{local_name, log, notify};
 
 const PING: Duration = Duration::from_secs(15);
 
@@ -24,6 +24,8 @@ pub struct Options {
     pub port: Option<u16>,
     /// Exit once paired and connected (used by `pair`).
     pub once: bool,
+    /// Suppress desktop notifications.
+    pub quiet: bool,
 }
 
 pub fn run(mut cfg: GuestConfig, opts: Options) -> Result<()> {
@@ -33,8 +35,10 @@ pub fn run(mut cfg: GuestConfig, opts: Options) -> Result<()> {
     if let Some(p) = opts.port {
         cfg.port = p;
     }
+    let _lock = crate::util::single_instance("guest")?;
     let cfg = Arc::new(Mutex::new(cfg));
     let echo = Arc::new(Mutex::new(Echo::default()));
+    let quiet = opts.quiet;
 
     let (tx, clips) = unbounded::<Clip>();
     thread::spawn(move || {
@@ -47,7 +51,7 @@ pub fn run(mut cfg: GuestConfig, opts: Options) -> Result<()> {
     let mut backoff = 1;
     loop {
         set_state(false, "", "connecting");
-        match session(&cfg, &clips, &echo, opts.once) {
+        match session(&cfg, &clips, &echo, opts.once, quiet) {
             Ok(true) => return Ok(()),
             Ok(false) => backoff = 1,
             Err(e) => {
@@ -86,7 +90,7 @@ fn resolve(cfg: &GuestConfig) -> Result<(SocketAddr, String)> {
 
 /// Returns Ok(true) if `once` was requested and the session reached the
 /// connected state; Ok(false) after a normal disconnect.
-fn session(cfg: &Arc<Mutex<GuestConfig>>, clips: &Receiver<Clip>, echo: &Arc<Mutex<Echo>>, once: bool) -> Result<bool> {
+fn session(cfg: &Arc<Mutex<GuestConfig>>, clips: &Receiver<Clip>, echo: &Arc<Mutex<Echo>>, once: bool, quiet: bool) -> Result<bool> {
     let snapshot = cfg.lock().unwrap().clone();
     let (addr, how) = resolve(&snapshot)?;
     log(format!("connecting to {addr} ({how})"));
@@ -110,7 +114,7 @@ fn session(cfg: &Arc<Mutex<GuestConfig>>, clips: &Receiver<Clip>, echo: &Arc<Mut
     if snapshot.paired() {
         writer.send(&Frame::Auth { id: snapshot.id.clone(), name: my_name.clone(), mac: hmac_hex(&snapshot.secret, &nonce) })?;
     } else {
-        pair(&writer, &mut reader, &stream, cfg, &my_name, &host_name)?;
+        pair(&writer, &mut reader, &stream, cfg, &my_name, &host_name, quiet)?;
     }
 
     match reader.next()? {
@@ -202,11 +206,15 @@ fn pair(
     cfg: &Arc<Mutex<GuestConfig>>,
     my_name: &str,
     host_name: &str,
+    quiet: bool,
 ) -> Result<()> {
     writer.send(&Frame::Pair { name: my_name.to_string() })?;
     match reader.next()? {
         Some(Frame::PairCode { code }) => {
             log(format!("Pairing code: {code}  —  click Allow in the dialog on \"{host_name}\""));
+            if !quiet {
+                notify(&format!("Pairing code {code}"), &format!("Click Allow in the dialog on \"{host_name}\" to share the clipboard."));
+            }
         }
         other => bail!("expected pairing code, got {other:?}"),
     }
@@ -219,9 +227,17 @@ fn pair(
             c.host_name = host_name.to_string();
             c.save()?;
             log(format!("paired with \"{host_name}\""));
+            if !quiet {
+                notify("Clipboard paired", &format!("Copy and paste now works with \"{host_name}\"."));
+            }
             Ok(())
         }
-        Some(Frame::PairDenied { reason }) => bail!("pairing denied: {reason}"),
+        Some(Frame::PairDenied { reason }) => {
+            if !quiet {
+                notify("Clipboard pairing denied", "Run `clipboard-bridge pair` in a terminal to try again.");
+            }
+            bail!("pairing denied: {reason}")
+        }
         other => bail!("unexpected reply while pairing: {other:?}"),
     }
 }

@@ -203,9 +203,34 @@ impl ExecReplace for Command {
 
 // ---------- status ----------
 
-pub fn status() -> Result<()> {
+pub fn status(json: bool) -> Result<()> {
     let state = State::read();
     let host_role = state.as_ref().map_or(is_host(), |s| s.role == "host");
+    if json {
+        let (paired, peer_cfg) = if host_role {
+            let cfg = crate::config::HostConfig::load()?;
+            (!cfg.guests.is_empty(), cfg.guests.iter().map(|g| g.name.clone()).collect::<Vec<_>>().join(", "))
+        } else {
+            let cfg = crate::config::GuestConfig::load()?;
+            (cfg.paired(), cfg.host_name.clone())
+        };
+        let s = state.clone().unwrap_or_default();
+        println!(
+            "{}",
+            serde_json::json!({
+                "role": if host_role { "host" } else { "guest" },
+                "service": service_state(),
+                "paired": paired,
+                "pairedWith": peer_cfg,
+                "connected": s.connected,
+                "peer": s.peer,
+                "detail": s.detail,
+                "updated": s.updated,
+                "version": env!("CARGO_PKG_VERSION"),
+            })
+        );
+        return Ok(());
+    }
     println!("role:     {}", if host_role { "host" } else { "guest" });
     println!("service:  {}", service_state());
     if host_role {

@@ -60,6 +60,7 @@ impl Shared {
 
 pub fn run(mut cfg: HostConfig, auto_accept: bool) -> Result<()> {
     cfg.auto_accept |= auto_accept;
+    let _lock = crate::util::single_instance("host")?;
     let name = local_name();
     let addr: SocketAddr = format!("{}:{}", cfg.bind, cfg.port).parse().context("invalid bind address")?;
     let listener = TcpListener::bind(addr).with_context(|| format!("listening on {addr}"))?;

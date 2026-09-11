@@ -42,6 +42,9 @@ enum Cmd {
         host: Option<String>,
         #[arg(long)]
         port: Option<u16>,
+        /// Do not show desktop notifications for pairing events
+        #[arg(long)]
+        quiet: bool,
     },
     /// Guest: forget any existing pairing and pair with the host now, then exit
     Pair {
@@ -63,7 +66,11 @@ enum Cmd {
         purge: bool,
     },
     /// Show service, pairing and link state
-    Status,
+    Status {
+        /// Machine-readable output
+        #[arg(long)]
+        json: bool,
+    },
     /// Follow the daemon log
     Logs,
     /// Forget all pairings (host: all guests; guest: its host)
@@ -83,13 +90,13 @@ fn main() -> Result<()> {
             }
             host::run(cfg, auto_accept)
         }
-        Cmd::Connect { host, port } => guest::run(config::GuestConfig::load()?, guest::Options { host, port, once: false }),
+        Cmd::Connect { host, port, quiet } => guest::run(config::GuestConfig::load()?, guest::Options { host, port, once: false, quiet }),
         Cmd::Pair { host, port } => {
             let mut cfg = config::GuestConfig::load()?;
             cfg.id.clear();
             cfg.secret.clear();
             cfg.save()?;
-            let r = guest::run(cfg, guest::Options { host, port, once: true });
+            let r = guest::run(cfg, guest::Options { host, port, once: true, quiet: false });
             if r.is_ok() && !service::is_host() {
                 let _ = std::process::Command::new("systemctl").args(["--user", "try-restart", service::UNIT]).status();
             }
@@ -97,7 +104,7 @@ fn main() -> Result<()> {
         }
         Cmd::Install { auto_accept } => service::install(auto_accept),
         Cmd::Uninstall { purge } => service::uninstall(purge),
-        Cmd::Status => service::status(),
+        Cmd::Status { json } => service::status(json),
         Cmd::Logs => service::logs(),
         Cmd::Forget => {
             if service::is_host() {
