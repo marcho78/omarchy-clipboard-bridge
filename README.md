@@ -132,3 +132,7 @@ Mac: `~/.local/share/clipboard-bridge/uninstall.sh --purge`
 ## License
 
 MIT
+
+## Author
+
+[@devsec_ai](https://x.com/devsec_ai) on X
