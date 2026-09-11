@@ -1,5 +1,6 @@
 #!/bin/bash
-# Guest installer: run inside the Omarchy VM. Downloads the latest release
+# Installer. In the Omarchy VM it installs the guest service; on macOS it hands
+# off to host/install.sh so either URL works. Downloads the latest release
 # binary (or builds from this clone if cargo is available and --build is given),
 # then installs and starts the systemd user service.
 set -euo pipefail
@@ -8,6 +9,10 @@ REPO="marcho78/omarchy-clipboard-bridge"
 BIN_DIR="${CLIPBOARD_BRIDGE_BIN_DIR:-$HOME/.local/bin}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "macOS detected: running the host installer instead."
+  exec bash -c "$(curl -fsSL "https://raw.githubusercontent.com/$REPO/main/host/install.sh")" -- "$@"
+fi
 command -v wl-copy >/dev/null || { echo "wl-clipboard is required: sudo pacman -S wl-clipboard" >&2; exit 1; }
 mkdir -p "$BIN_DIR"
 
