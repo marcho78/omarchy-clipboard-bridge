@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
@@ -56,9 +57,14 @@ pub fn watch(tx: Sender<Clip>) -> Result<()> {
 }
 
 pub fn set(clip: &Clip) -> Result<()> {
+    // wl-copy forks a server that keeps offering the selection. Put it in its
+    // own process group so it outlives this daemon if we are killed or
+    // restarted (for example when omarchy-shell reloads plugins); otherwise
+    // the clipboard content would vanish with us.
     let mut child = Command::new("wl-copy")
         .arg("--type")
         .arg(if clip.mime == MIME_PNG { MIME_PNG } else { "text/plain;charset=utf-8" })
+        .process_group(0)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
