@@ -1,31 +1,42 @@
-# Maintainer: marcho78
-pkgname=omarchy-clipboard-bridge
-pkgver=0.2.0
+# Maintainer: marcho78 <marcho78@users.noreply.github.com>
+pkgname=clipboard-bridge
+pkgver=0.2.2
 pkgrel=1
-pkgdesc="Shared clipboard between an Omarchy (Hyprland) VM and its macOS host under Parallels Desktop"
+pkgdesc="Shared clipboard (text and images) between an Omarchy/Hyprland VM and its macOS host under Parallels Desktop"
 arch=('x86_64' 'aarch64')
 url="https://github.com/marcho78/omarchy-clipboard-bridge"
 license=('MIT')
-depends=('wl-clipboard')
+depends=('gcc-libs' 'glibc' 'wl-clipboard')
 makedepends=('cargo')
-source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+optdepends=('libnotify: pairing-code desktop notification')
+provides=('omarchy-clipboard-bridge')
+conflicts=('omarchy-clipboard-bridge')
+_srcname=omarchy-clipboard-bridge
+source=("$_srcname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+sha256sums=('4c99c609f30e67f0bd49b2209b2b93f43263f7c75506d1fb1e1f187fa82b54b2')
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd "$_srcname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$_srcname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
   cargo build --frozen --release
 }
 
+check() {
+  cd "$_srcname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo test --frozen --release
+}
+
 package() {
-  cd "$pkgname-$pkgver"
-  install -Dm755 target/release/clipboard-bridge "$pkgdir/usr/bin/clipboard-bridge"
-  ln -s clipboard-bridge "$pkgdir/usr/bin/omarchy-clipboard-bridge"
+  cd "$_srcname-$pkgver"
+  install -Dm755 "target/release/clipboard-bridge" "$pkgdir/usr/bin/clipboard-bridge"
   install -Dm644 packaging/aur/clipboard-bridge.service "$pkgdir/usr/lib/systemd/user/clipboard-bridge.service"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"

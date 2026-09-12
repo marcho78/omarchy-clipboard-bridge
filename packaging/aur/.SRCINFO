@@ -1,0 +1,19 @@
+pkgbase = clipboard-bridge
+	pkgdesc = Shared clipboard (text and images) between an Omarchy/Hyprland VM and its macOS host under Parallels Desktop
+	pkgver = 0.2.2
+	pkgrel = 1
+	url = https://github.com/marcho78/omarchy-clipboard-bridge
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	depends = gcc-libs
+	depends = glibc
+	depends = wl-clipboard
+	optdepends = libnotify: pairing-code desktop notification
+	provides = omarchy-clipboard-bridge
+	conflicts = omarchy-clipboard-bridge
+	source = omarchy-clipboard-bridge-0.2.2.tar.gz::https://github.com/marcho78/omarchy-clipboard-bridge/archive/v0.2.2.tar.gz
+	sha256sums = 4c99c609f30e67f0bd49b2209b2b93f43263f7c75506d1fb1e1f187fa82b54b2
+
+pkgname = clipboard-bridge

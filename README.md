@@ -12,25 +12,32 @@ over the Parallels virtual network.
 
 ### 1. In the Omarchy VM
 
-Recommended: the Omarchy plugin, which runs the daemon inside omarchy-shell
-and keeps it updated with the plugin:
+Build and install the daemon as a package. The PKGBUILD downloads the tagged
+source, checks its SHA-256, and compiles it on your machine (a couple of
+minutes, needs `cargo`):
+
+```bash
+git clone https://github.com/marcho78/omarchy-clipboard-bridge.git
+cd omarchy-clipboard-bridge/packaging/aur
+makepkg -si
+```
+
+Then either the Omarchy plugin, which runs the daemon inside omarchy-shell:
 
 ```bash
 omarchy plugin add https://github.com/marcho78/omarchy-clipboard-bridge-plugin.git --enable
 ```
 
-Or without the plugin, as a `systemd --user` service:
+or, without the plugin, the `systemd --user` unit the package installs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/marcho78/omarchy-clipboard-bridge/main/install.sh | bash
+systemctl --user enable --now clipboard-bridge
 ```
 
-or from a clone with `./install.sh --build` if you have cargo. An AUR package
-is prepared under `packaging/aur` but not yet published.
-
-The script puts `clipboard-bridge` in `~/.local/bin` and enables a
-`systemd --user` service that starts with your Hyprland session. Use one or
-the other; the daemon refuses to run twice.
+Use one or the other; the daemon refuses to run twice. Without a package you
+can also `cargo install --git https://github.com/marcho78/omarchy-clipboard-bridge --tag v0.2.2`
+and run `clipboard-bridge install`, which sets up the same user unit from
+`~/.cargo/bin`.
 
 ### 2. On the Mac
 
